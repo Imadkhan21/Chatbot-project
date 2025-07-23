@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response
 
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'csv'}
+ALLOWED_EXTENSIONS = {'csv','db'}
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
