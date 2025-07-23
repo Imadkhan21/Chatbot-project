@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cricket Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        .typing .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin: 0 2px;
+            background-color: #999;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        .typing .dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing .dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes blink {
+            0%, 80%, 100% { opacity: 0; }
+            40% { opacity: 1; }
+        }
+
+        .chat-box {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .chat-entry {
+            animation: fadeIn 0.4s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        #speakToggle {
+            background-color: #00ffc3;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        #speakToggle.off {
+            background-color: #555;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏏 Cricket Data Chatbot</h1>
+
+    <form method="POST" enctype="multipart/form-data" action="/upload" class="upload-form">
+        <label for="fileUpload" class="custom-file-upload">📂 Choose CSV File</label>
+        <input type="file" name="file" id="fileUpload" required>
+        <button type="submit">Upload CSV</button>
+    </form>
+
+    {% if filename %}
+        <p class="filename">📄 <strong>Current File:</strong> {{ filename }}</p>
+    {% else %}
+        <p class="filename">⚠️ No file uploaded.</p>
+    {% endif %}
+
+    <div class="chat-box" id="chatHistory">
+        {% for message, response in history %}
+            <div class="chat-entry user-msg">
+                <div class="bubble user"><strong>You:</strong> {{ message }}</div>
+            </div>
+            <div class="chat-entry bot-msg">
+                <div class="bubble bot"><strong>Bot:</strong> {{ response }}</div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <form id="chatForm" class="message-form">
+        <input type="text" id="messageInput" name="message" placeholder="Ask about player stats..." required>
+        <button type="submit">Send</button>
+        <button type="button" id="micBtn" title="Speak" style="background-color:#555;">🎤</button>
+        <button type="button" id="clearChatBtn" style="background-color:#ff4d4d; margin-left: 10px;">Clear Chat</button>
+        <button type="button" id="speakToggle" class="on" title="Toggle speak">🔊 Speak: ON</button>
+    </form>
+</div>
+
+<script>
+const chatForm = document.getElementById("chatForm");
+const chatHistory = document.getElementById("chatHistory");
+const messageInput = document.getElementById("messageInput");
+const micBtn = document.getElementById("micBtn");
+const clearChatBtn = document.getElementById("clearChatBtn");
+const speakToggle = document.getElementById("speakToggle");
+
+let speakEnabled = true;  // speaking enabled by default
+
+// Toggle speak button click
+speakToggle.addEventListener("click", () => {
+    speakEnabled = !speakEnabled;
+    if (speakEnabled) {
+        speakToggle.textContent = "🔊 Speak: ON";
+        speakToggle.classList.remove("off");
+    } else {
+        speakToggle.textContent = "🔇 Speak: OFF";
+        speakToggle.classList.add("off");
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); // stop speaking if toggled off
+        }
+    }
+});
+
+chatForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const message = messageInput.value.trim();
+    if (!message) return;
+
+    // Add user message
+    chatHistory.insertAdjacentHTML("beforeend", `
+        <div class="chat-entry user-msg">
+            <div class="bubble user"><strong>You:</strong> ${message}</div>
+        </div>
+    `);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    messageInput.value = "";
+
+    // Show typing indicator
+    const typingElement = document.createElement("div");
+    typingElement.classList.add("chat-entry", "bot-msg", "typing-indicator");
+    typingElement.innerHTML = `
+        <div class="bubble bot typing">
+            <strong>Bot:</strong> <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
+    `;
+    chatHistory.appendChild(typingElement);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+
+    // Send message to server
+    const res = await fetch("/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+
+    // Remove typing
+    typingElement.remove();
+
+    // Add bot response
+    chatHistory.insertAdjacentHTML("beforeend", `
+        <div class="chat-entry bot-msg">
+            <div class="bubble bot"><strong>Bot:</strong> ${data.response}</div>
+        </div>
+    `);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+
+    // Speak bot response if enabled
+    if (speakEnabled && 'speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(data.response);
+        utterance.lang = 'en-US';
+        window.speechSynthesis.speak(utterance);
+    }
+});
+
+// 🎤 Voice recognition
+if ('webkitSpeechRecognition' in window) {
+    const recognition = new webkitSpeechRecognition();
+    recognition.lang = 'en-US';
+
+    micBtn.addEventListener("click", () => {
+        recognition.start();
+        micBtn.textContent = "🎙️ Listening...";
+    });
+
+    recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        messageInput.value = transcript;
+        micBtn.textContent = "🎤";
+    };
+
+    recognition.onerror = function() {
+        micBtn.textContent = "🎤";
+    };
+
+    recognition.onend = function() {
+        micBtn.textContent = "🎤";
+    };
+} else {
+    micBtn.disabled = true;
+    micBtn.title = "Voice not supported";
+}
+
+// Clear chat button logic
+clearChatBtn.addEventListener("click", async () => {
+    const res = await fetch("/clear_chat", { method: "POST" });
+    if (res.ok) {
+        chatHistory.innerHTML = "";
+        messageInput.value = "";
+        messageInput.focus();
+    } else {
+        alert("Failed to clear chat history.");
+    }
+});
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,224 @@
+/* Dark mode style like ChatGPT */
+body {
+    background-color: #1e1e2f;
+    color: #e1e1e1;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 20px;
+    background-color: #2b2b3d;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.3);
+}
+
+h1 {
+    text-align: center;
+    color: #00ffc3;
+    margin-bottom: 30px;
+}
+
+.upload-form, .message-form {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.upload-form input[type="file"],
+.message-form input[type="text"] {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+}
+
+.upload-form button,
+.message-form button {
+    background-color: #00ffc3;
+    color: #000;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.upload-form button:hover,
+.message-form button:hover {
+    background-color: #00b08a;
+}
+
+.filename {
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+    color: #a0a0b0;
+}
+
+.chat-box {
+    background-color: #1c1c2a;
+    border-radius: 10px;
+    padding: 15px;
+    height: 500px;             /* Fixed height for the chat container */
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-history {
+    overflow-y: auto;
+    flex-grow: 1;              /* Takes all available space above form */
+    padding-right: 10px;
+    margin-bottom: 10px;
+}
+
+.chat-entry {
+    margin-bottom: 10px;
+}
+
+.bubble {
+    padding: 10px 15px;
+    border-radius: 15px;
+    max-width: 80%;
+    line-height: 1.4;
+    white-space: pre-wrap;
+}
+
+.user-msg .bubble.user {
+    background-color: #0078d4;
+    color: #fff;
+    margin-left: auto;
+    text-align: right;
+}
+
+.bot-msg .bubble.bot {
+    background-color: #3c3c4e;
+    color: #eaeaea;
+    margin-right: auto;
+}
+
+.message-form {
+    margin-bottom: 0;          /* Remove bottom margin */
+}
+
+.message-form input[type="text"] {
+    flex-grow: 1;
+    max-width: none;
+    padding: 8px 12px;
+    font-size: 1rem;
+    border-radius: 6px;
+    border: none;
+    background-color: #2b2b3d;
+    color: #e1e1e1;
+    outline: none;
+}
+
+.message-form button {
+    padding: 8px 14px;
+    font-size: 1rem;
+    min-width: 50px;
+    border-radius: 6px;
+    cursor: pointer;
+    background-color: #00ffc3;
+    color: #000;
+    border: none;
+    font-weight: bold;
+}
+
+.message-form button:hover {
+    background-color: #00b08a;
+}
+
+@media (max-width: 600px) {
+    .container {
+        margin: 20px;
+        padding: 15px;
+    }
+
+    .upload-form, .message-form {
+        flex-direction: column;
+    }
+
+    .upload-form button,
+    .message-form button {
+        width: 100%;
+    }
+}
+
+input[type="file"] {
+    display: none;
+}
+
+.custom-file-upload {
+    background-color: #00ffc3;
+    color: #000;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    display: inline-block;
+    transition: background-color 0.2s ease;
+}
+
+.custom-file-upload:hover {
+    background-color: #00b08a;
+}
+
+.delete-btn {
+    background-color: #ff4d4f;
+    border: none;
+    padding: 8px 16px;
+    color: white;
+    font-weight: bold;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: background-color 0.2s ease;
+}
+
+.delete-btn:hover {
+    background-color: #cc3a3a;
+}
+
+#micBtn {
+    border-radius: 6px;
+    color: white;
+    padding: 10px;
+    cursor: pointer;
+    border: none;
+}
+
+/* Typing bubble animation */
+.typing span {
+    display: inline-block;
+    background: #888;
+    width: 8px;
+    height: 8px;
+    margin: 0 2px;
+    border-radius: 50%;
+    animation: blink 1.4s infinite both;
+}
+
+.typing span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+.typing span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes blink {
+    0% {
+        opacity: 0.2;
+        transform: scale(1);
+    }
+    20% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+    100% {
+        opacity: 0.2;
+        transform: scale(1);
+    }
+}
