@@ -6,4 +6,4 @@ services:
     startCommand: gunicorn app:app
     envVars:
       - key: OPENAI_API_KEY
-        value: AIzaSyDXB538kTAfi6dILexYffuoXrmEhXl8hqc
+        value: AIzaSyChkF1u-5t7pFrR935llWgo_9kwgvbomHQ
