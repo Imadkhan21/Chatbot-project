@@ -64,6 +64,15 @@
         #micBtn.listening:hover {
             background-color: #e60000;
         }
+        
+        /* Improved formatting for bot responses */
+        .bubble.bot {
+            white-space: pre-line; /* Preserve line breaks */
+        }
+        
+        .bubble.bot strong {
+            color: #0066cc;
+        }
     </style>
 </head>
 <body>
@@ -179,6 +188,7 @@ speakToggle.addEventListener("click", () => {
         }
     }
 });
+
 chatForm.addEventListener("submit", async function (e) {
     e.preventDefault();
     const message = messageInput.value.trim();
