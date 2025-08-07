@@ -31,3 +31,7 @@ Thumbs.db
 
 # Docker stuff (optional)
 docker-compose.override.yml
+
+# Hide DB file 
+chatbot_data.db
+uploads/patient_details2.csv
