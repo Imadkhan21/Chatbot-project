@@ -270,13 +270,26 @@ chatForm.addEventListener("submit", async function (e) {
         typingElement.remove();
         
         // Add bot response
-        chatHistory.insertAdjacentHTML("beforeend", `
-            <div class="chat-entry bot-msg">
+        if (data.response && data.response.includes('<table')) {
+            // Render as HTML (for tables)
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-entry bot-msg';
+            wrapper.innerHTML = `
                 <div class="bot-controls">
                     <div class="bubble bot"><strong>Bot:</strong> ${data.response}</div>
                 </div>
-            </div>
-        `);
+            `;
+            chatHistory.appendChild(wrapper);
+        } else {
+            // Render as plain text (escape HTML)
+            chatHistory.insertAdjacentHTML("beforeend", `
+                <div class="chat-entry bot-msg">
+                    <div class="bot-controls">
+                        <div class="bubble bot"><strong>Bot:</strong> ${data.response.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    </div>
+                </div>
+            `);
+        }
         chatHistory.scrollTop = chatHistory.scrollHeight;
         
         // Speak bot response if enabled

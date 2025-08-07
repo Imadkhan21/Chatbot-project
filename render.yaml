@@ -5,5 +5,5 @@ services:
     buildCommand: ""
     startCommand: gunicorn app:app
     envVars:
-      - key: OPENAI_API_KEY
-        value: AIzaSyChkF1u-5t7pFrR935llWgo_9kwgvbomHQ
+      - key: GEMINI_API_KEY
+        value: AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0

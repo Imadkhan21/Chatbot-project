@@ -1,4 +1,28 @@
 /* Base styles */
+
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 10px;
+}
+.solid-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: Arial, sans-serif;
+}
+.solid-table th, .solid-table td {
+    border: 1px solid #ccc;
+    padding: 8px 12px;
+    text-align: left;
+}
+.solid-table th {
+    background-color: #f0f0f0;
+    font-weight: bold;
+}
+
+
+
+
 body {
     margin: 0;
     font-family: 'Segoe UI', sans-serif;
