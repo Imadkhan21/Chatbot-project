@@ -2,16 +2,16 @@ import os
 import pandas as pd
 import sqlite3
 import threading
-import time
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response
 
 UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'csv','db'}
+ALLOWED_EXTENSIONS = {'csv', 'db'}
+
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = '...'  # Required for flash messages
+app.secret_key = '...'  # Replace with your secret key
 
 # Initialize DB
 DB_FILE = 'chatbot_data.db'
@@ -21,9 +21,9 @@ conn.execute('''CREATE TABLE IF NOT EXISTS current_file (id INTEGER PRIMARY KEY,
 conn.commit()
 conn.close()
 
-# Global variables for stop execution
-stop_execution_flag = False
-execution_lock = threading.Lock()
+# Global cache and locks
+data_cache = None
+data_lock = threading.Lock()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -44,6 +44,19 @@ def set_current_file(filename):
     conn.commit()
     conn.close()
 
+def load_data():
+    global data_cache
+    current_file = get_current_file()
+    if current_file:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], current_file)
+        # Load CSV into memory
+        df = pd.read_csv(file_path)
+        with data_lock:
+            data_cache = df
+    else:
+        with data_lock:
+            data_cache = None
+
 @app.route('/')
 def index():
     current_file = get_current_file()
@@ -57,68 +70,24 @@ def index():
 
 @app.route('/ask', methods=['POST'])
 def ask():
-    global stop_execution_flag
-    
-    # Reset stop flag at the beginning of each request
-    with execution_lock:
-        stop_execution_flag = False
-    
     user_input = request.json.get('message')
-    current_file = get_current_file()
-    
-    if not current_file:
-        return jsonify({'response': '⚠️ No file uploaded. Please upload a CSV first.'})
-    
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], current_file)
-    df = pd.read_csv(file_path)
-    
-    # Check if execution was stopped before processing
-    with execution_lock:
-        if stop_execution_flag:
-            return jsonify({'response': 'Request stopped by user.'})
-    
-    # Process the request with periodic checks for stop flag
-    def process_with_stop_check():
-        global stop_execution_flag
-        
-        # Simulate processing time - in a real app, this would be your actual processing
-        # We'll break the processing into chunks to check for stop flag
-        for i in range(10):  # Simulate 10 chunks of work
-            time.sleep(0.5)  # Each chunk takes 0.5 seconds
-            
-            # Check if execution was stopped
-            with execution_lock:
-                if stop_execution_flag:
-                    return None
-        
-        # If not stopped, get the actual response
-        return get_chat_response(user_input, df)
-    
-    # Process the request
-    response = process_with_stop_check()
-    
-    # If execution was stopped during processing
-    if response is None:
-        return jsonify({'response': 'Request stopped by user.'})
-    
+    with data_lock:
+        df = data_cache
+
+    if df is None:
+        return jsonify({'response': '⚠️ No file uploaded or data loaded. Please upload a CSV first.'})
+
+    # Directly get response without delay
+    response = get_chat_response(user_input, df)
+
     # Save to DB
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO chat_history (message, response) VALUES (?, ?)", (user_input, response))
     conn.commit()
     conn.close()
-    
-    return jsonify({'response': response})
 
-@app.route('/stop_execution', methods=['POST'])
-def stop_execution():
-    global stop_execution_flag
-    
-    # Set the stop flag
-    with execution_lock:
-        stop_execution_flag = True
-    
-    return jsonify({'status': 'stopped'})
+    return jsonify({'response': response})
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -129,6 +98,7 @@ def upload_file():
         filename = secure_filename(file.filename)
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         set_current_file(filename)
+        load_data()  # Load and cache the CSV after upload
         # Clear chat history
         conn = sqlite3.connect(DB_FILE)
         conn.execute("DELETE FROM chat_history")
@@ -150,6 +120,10 @@ def delete_file():
         cursor.execute("DELETE FROM chat_history")
         conn.commit()
         conn.close()
+        # Clear cache
+        with data_lock:
+            global data_cache
+            data_cache = None
     return redirect(url_for('index'))
 
 @app.route('/clear_chat', methods=['POST'])
@@ -162,5 +136,6 @@ def clear_chat():
 
 if __name__ == '__main__':
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    load_data()  # Load data on startup if file present
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
