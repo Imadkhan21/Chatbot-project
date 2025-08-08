@@ -74,21 +74,25 @@ def load_data():
         with data_lock:
             data_cache = None
 
+# Change STATIC_CSV path to match where you actually store it in repo
+STATIC_CSV = os.path.join(BASE_DIR, 'uploads', 'patient_details2.csv')  
+
 def bootstrap_dataset():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     current = get_current_file()
     current_path = os.path.join(UPLOAD_FOLDER, current) if current else None
+
     needs_seed = (not current) or (current and not os.path.exists(current_path))
 
     if needs_seed:
         if os.path.exists(STATIC_CSV):
             dest = os.path.join(UPLOAD_FOLDER, os.path.basename(STATIC_CSV))
-            if not os.path.exists(dest):
-                shutil.copy(STATIC_CSV, dest)
-                print(f"[INIT] Copied {STATIC_CSV} to {dest}")
+            shutil.copy(STATIC_CSV, dest)  # Always overwrite to be safe
             set_current_file(os.path.basename(STATIC_CSV))
+            print(f"[INIT] Seed dataset loaded: {dest}")
         else:
-            print("[INIT] No static CSV found. Waiting for upload.")
+            print(f"[INIT] No static CSV found at {STATIC_CSV}")
+
 
 try:
     bootstrap_dataset()
