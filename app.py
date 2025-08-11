@@ -8,6 +8,9 @@ from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
 
 # === Paths ===
+
+stop_execution_flag = False
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'csv', 'db'}
@@ -112,6 +115,9 @@ def index():
 
 @app.route('/ask', methods=['POST'])
 def ask():
+    global stop_execution_flag
+    stop_execution_flag = False  # reset at the start of request
+
     user_input = request.json.get('message')
     with data_lock:
         df = data_cache
@@ -124,7 +130,13 @@ def ask():
         cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
         session_history = cursor.fetchall()
 
+    if stop_execution_flag:
+        return jsonify({'status': 'stopped', 'response': None})
+
     response = get_chat_response(user_input, df, session_history=session_history)
+
+    if stop_execution_flag:
+        return jsonify({'status': 'stopped', 'response': None})
 
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
@@ -132,6 +144,14 @@ def ask():
         conn.commit()
 
     return jsonify({'response': response})
+
+
+@app.route('/stop_execution', methods=['POST'])
+def stop_execution():
+    global stop_execution_flag
+    stop_execution_flag = True
+    return jsonify({'status': 'stopped'})
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
