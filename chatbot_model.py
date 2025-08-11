@@ -3,6 +3,7 @@ import google.generativeai as genai
 import re
 from langdetect import detect, DetectorFactory
 import logging
+import io
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 DetectorFactory.seed = 0  # to make language detection consistent
 
 # 🔑 Gemini API key
-GEMINI_API_KEY = "AIzaSyDXB538kTAfi6dILexYffuoXrmEhXl8hqc"
+GEMINI_API_KEY = "AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # 📦 Load Gemini model
@@ -27,79 +28,138 @@ def is_urdu(text):
     has_urdu_script = len(urdu_chars) > 5
     is_probably_roman_urdu = lang in ["ur", "hi", "fa"]
     return has_urdu_script or is_probably_roman_urdu
+# ---------- Formatting Functions ----------
+def format_response_table(response_text: str):
+    """
+    Converts markdown or tab-separated table to styled HTML table.
+    Removes markdown separator lines with only dashes.
+    """
+    table_lines = []
+    in_table = False
 
-# ✅ Format Gemini response to look clean
-def format_response(response_text: str) -> str:
-    logger.info(f"Formatting response: {response_text[:100]}...")
-    
-    # If response is empty, return a default message
+    for line in response_text.splitlines():
+        if "|" in line or "\t" in line:
+            if re.match(r"^\s*[-\s|]+\s*$", line):  # Skip separator row
+                continue
+            table_lines.append(line.strip())
+            in_table = True
+        elif in_table and line.strip() == "":
+            break  # End of table
+
+    if table_lines:
+        # Detect separator type
+        sep = "|" if "|" in table_lines[0] else "\t"
+
+        # Normalize rows
+        normalized_lines = []
+        for line in table_lines:
+            if sep == "|":
+                cells = [cell.strip() for cell in line.strip('|').split('|')]
+            else:
+                cells = [cell.strip() for cell in line.split('\t')]
+            normalized_lines.append('\t'.join(cells))  # Normalize to tab
+
+        fixed_table = "\n".join(normalized_lines)
+
+        try:
+            df = pd.read_csv(io.StringIO(fixed_table), sep="\t")
+            df = df.dropna(how='all')  # Drop empty rows
+            df.columns = [col.strip() for col in df.columns]
+
+            # Generate HTML table
+            html_table = '''
+<style>
+.table-container {
+    max-width: 100%;
+    overflow-x: auto;
+}
+.solid-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.solid-table th, .solid-table td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: left;
+}
+.solid-table th {
+    background-color: #f2f2f2;
+}
+.solid-table tr.dash-row {
+    display: none; /* hide dashed rows if any */
+}
+</style>
+<div class="table-container">
+<table class="solid-table">
+<thead><tr>
+'''
+            # Headers
+            for col in df.columns:
+                html_table += f"<th>{col}</th>"
+            html_table += "</tr></thead><tbody>"
+
+            # Rows
+            for _, row in df.iterrows():
+                row_values = list(row)
+                if all(re.match(r"^-+$", str(cell).strip()) for cell in row_values):
+                    html_table += '<tr class="dash-row">'
+                else:
+                    html_table += '<tr>'
+                for cell in row:
+                    html_table += f"<td>{cell}</td>"
+                html_table += "</tr>"
+
+            html_table += "</tbody></table></div>"
+            return html_table
+
+        except Exception as e:
+            logger.error(f"Error parsing table: {str(e)}")
+            return "<pre>" + fixed_table + "</pre>"
+
+    return None
+
+def format_response_list(response_text: str) -> str:
+    logger.info(f"Formatting response as list: {response_text[:100]}...")
     if not response_text or response_text.strip() == "":
-        logger.warning("Empty response received from Gemini")
         return "I'm sorry, I couldn't generate a response. Please try again."
-    
-    # Remove code blocks
-    response_text = re.sub(r'```python.*?```', '', response_text, flags=re.DOTALL)
+    # Remove markdown code blocks
     response_text = re.sub(r'```.*?```', '', response_text, flags=re.DOTALL)
-    
-    # Split response into records based on patient or MRN pattern
-    records = re.split(r'(?=\*\*(?:Patient|MRN)\*\*:)', response_text)
+    # REMOVE BOLD MARKDOWN (**text**) globally!
+    response_text = re.sub(r'\*\*(.*?)\*\*', r'\1', response_text)
+    # Proceed as before
+    records = re.split(r'(?=Patient:|MRN:)', response_text)
     formatted_records = []
-    
     for record in records:
         if not record.strip():
             continue
-            
-        # Clean up the record
         record = record.strip()
-        
-        # Remove any leading dashes
         record = re.sub(r'^-+\s*', '', record)
-        
-        # Extract all field-value pairs
-        field_pattern = r'(\*\*[^*]+\*\*:\s*[^\n]+)'
-        fields = re.findall(field_pattern, record)
-        
-        if not fields:
-            # If no fields found, treat as a general message
-            formatted_records.append(record)
-            continue
-            
-        # Start the record with a dash
-        formatted_record = "- "
-        
-        # Process each field
-        for i, field in enumerate(fields):
-            # Clean up the field
-            field = re.sub(r'-+\s*', '', field.strip())
-            
-            # Add the field to the record
-            if i == 0:
-                # First field goes on the same line as the dash
-                formatted_record += field
-            else:
-                # Subsequent fields are indented
-                formatted_record += f"\n  {field}"
-        
-        formatted_records.append(formatted_record)
-    
-    # Join records with double newlines
-    result = '\n\n'.join(formatted_records).strip()
-    
-    # If after formatting the result is empty, return the original response
-    if not result:
-        logger.warning("Formatted result is empty, returning original response")
-        return response_text
-    
-    logger.info(f"Formatted result: {result[:100]}...")
-    return result
+        # This regex may be unnecessary for your city list, so just add as bullet
+        formatted_records.append(f"- {record}")
+    result = '\n'.join(formatted_records).strip()
+    return result if result else response_text
 
-# ✅ Get response from Gemini - UPDATED TO INCLUDE SESSION HISTORY
-def get_chat_response(user_message, df, session_history=None):
+def format_response_paragraph(response_text: str) -> str:
+    logger.info(f"Formatting response as paragraph: {response_text[:100]}...")
+    response_text = re.sub(r'```.*?```', '', response_text, flags=re.DOTALL)
+    response_text = re.sub(r'\*\*(.*?)\*\*', r'\1', response_text)
+    return response_text.replace("\n", " ").strip()
+
+# ---------- Main Chat Function ----------
+def get_chat_response(user_message, df, session_history=None, answer_format='auto'):
+    """
+    Merged function supporting:
+    - HTML table output (if markdown table detected and answer_format='auto' or 'table')
+    - List format (if answer_format='list')
+    - Paragraph format (if answer_format='paragraph')
+    - Session history
+    """
     try:
         logger.info(f"Processing user message: {user_message}")
-        
-        # Limit to first 500 rows to stay within Gemini token quota
-        df_sample = df.head(500)
+        # Data cleaning
+        df = df.dropna(axis=0, how='all')
+        df = df.dropna(axis=1, how='all')
+        df_sample = df.head(300)
         columns = df_sample.columns.tolist()
         row_count = len(df_sample)
         data_preview = df_sample.to_dict(orient='records')
@@ -107,66 +167,60 @@ def get_chat_response(user_message, df, session_history=None):
         language_instruction = (
             "جواب صرف اردو میں دیں۔ انگریزی استعمال نہ کریں۔\n\n" if urdu_requested else ""
         )
-        
-        # Format session history for the prompt
+        # Session history
         history_text = ""
         if session_history:
             history_text = "\n\nRECENT CHAT HISTORY:\n"
-            for i, (user_msg, bot_resp) in enumerate(session_history[-5:]):
-                # Truncate long messages to avoid exceeding token limit
+            for user_msg, bot_resp in session_history[-5:]:
                 user_msg = user_msg[:200] + "..." if len(user_msg) > 200 else user_msg
                 bot_resp = bot_resp[:200] + "..." if len(bot_resp) > 200 else bot_resp
                 history_text += f"User: {user_msg}\nBot: {bot_resp}\n\n"
         
         prompt = f"""
-You are a dental clinic data assistant with memory of recent conversations. A user has uploaded a dataset containing dental clinic records.
-🔢 The dataset contains {row_count} rows (showing first 500 rows).
-📊 The available columns are: {columns}
-Here is a sample of the dataset (first 500 rows only) as JSON records:
-{data_preview}
+You are a helpful assistant. Always respond in short and concise answers (max 2–3 sentences). 
+Do NOT mention phrases like "in this dataset", "based on the data", "from the records", etc.
+Give the answer directly without referring to the source of information.
+
+# Context
+You are a dental clinic data assistant with memory of recent conversations. 
+The dataset contains {row_count} rows (first 500 shown).
+Columns: {columns}
+Sample data (JSON, first 500 rows): {data_preview}
+
 {history_text}
-📄 Format your response as a clean, readable list with proper formatting.
-📌 Answer the user's question based strictly on the data above.
-✅ Be accurate with numbers (e.g., patient count, revenue, invoices, appointments).
-🦷 Provide answers related to patients, treatments, invoices, payments, doctors, and appointments if asked.
-💬 If the user asks general questions (e.g., "how are you?"), respond politely and stay helpful.
-🚫 If any info is missing in the dataset, clearly say it's not available.
-💭 Use the recent chat history to provide context-aware responses. Remember details from previous conversations.
 
-RESPONSE FORMATTING INSTRUCTIONS:
-1. For data records, use this exact format:
-   - **Patient**: [Name]
-     **MRN**: [Number]
-     **Registration date**: [Date]
-     **City**: [City]
-     **Invoice number**: [Number]
-     **Invoice date**: [Date]
-     **Description**: [Description]
-     **Price**: [Amount]
-     **Doctor**: [Name]
+# Rules
+- Give the direct answer to the question.
+- Do not reference the dataset or mention its size or columns unless explicitly asked.
+- No bold text, emojis, or markdown symbols like "**".
+- Be accurate with numbers.
+- If info is missing, say "Not available".
+- If general question (e.g. "how are you?"), respond politely.
 
-2. For general questions, respond in a friendly, conversational tone.
-
-3. For lists of items, use bullet points:
-   - Item 1
-   - Item 2
-   - Item 3
-
-4. Always use proper markdown formatting for field names: **Field Name**: Value
-
-IMPORTANT: Always provide a meaningful response. Never return an empty message.
-
-{language_instruction}
 User's Question: "{user_message}"
 """
+
         logger.info(f"Sending prompt to Gemini: {prompt[:200]}...")
         response = model.generate_content(prompt)
-        logger.info(f"Received response from Gemini: {response.text[:100]}...")
+        logger.info(f"Received response: {response.text[:100]}...")
         
-        formatted_response = format_response(response.text)
-        logger.info(f"Formatted response: {formatted_response[:100]}...")
-        
-        return formatted_response
+        if answer_format == 'auto' or answer_format == 'table':
+            table_html = format_response_table(response.text)
+            if table_html:
+                return table_html
+            # Fallback: try list style if table is not detected
+            if answer_format == 'table':
+                # If forced to return table but no table found, return plain text
+                return response.text.strip()
+            # Else try list style
+            return format_response_list(response.text)
+        elif answer_format == 'list':
+            return format_response_list(response.text)
+        elif answer_format == 'paragraph':
+            return format_response_paragraph(response.text)
+        else:
+            # fallback
+            return response.text.strip()
     except Exception as e:
         logger.error(f"Error in get_chat_response: {str(e)}")
         return f"Error generating response: {str(e)}"
