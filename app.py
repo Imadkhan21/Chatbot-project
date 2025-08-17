@@ -20,7 +20,7 @@ DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
 # === Flask App ===
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = 'replace_with_your_secret_key'
+app.secret_key = 'AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0'
 
 # === DB Initialization ===
 def init_db():
@@ -196,5 +196,5 @@ def clear_chat():
 
 # === Entry Point ===
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5004))
     app.run(host='0.0.0.0', port=port, debug=True)
