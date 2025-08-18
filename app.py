@@ -13,9 +13,7 @@ from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
 
 # === Paths ===
-
 stop_execution_flag = False
-
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'csv', 'db'}
@@ -89,9 +87,7 @@ def bootstrap_dataset():
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     current = get_current_file()
     current_path = os.path.join(UPLOAD_FOLDER, current) if current else None
-
     needs_seed = (not current) or (current and not os.path.exists(current_path))
-
     if needs_seed:
         if os.path.exists(STATIC_CSV):
             dest = os.path.join(UPLOAD_FOLDER, os.path.basename(STATIC_CSV))
@@ -100,7 +96,6 @@ def bootstrap_dataset():
             print(f"[INIT] Seed dataset loaded: {dest}")
         else:
             print(f"[INIT] No static CSV found at {STATIC_CSV}")
-
 
 try:
     bootstrap_dataset()
@@ -122,41 +117,37 @@ def index():
 def ask():
     global stop_execution_flag
     stop_execution_flag = False  # reset at the start of request
-
     user_input = request.json.get('message')
     with data_lock:
         df = data_cache
-
     if df is None:
         return jsonify({'response': '⚠ No file uploaded or data loaded. Please upload a CSV first.'})
-
+    
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
         session_history = cursor.fetchall()
-
+    
     if stop_execution_flag:
         return jsonify({'status': 'stopped', 'response': None})
-
+    
     response = get_chat_response(user_input, df, session_history=session_history)
-
+    
     if stop_execution_flag:
         return jsonify({'status': 'stopped', 'response': None})
-
+    
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute("INSERT INTO chat_history (message, response) VALUES (?, ?)", (user_input, response))
         conn.commit()
-
+    
     return jsonify({'response': response})
-
 
 @app.route('/stop_execution', methods=['POST'])
 def stop_execution():
     global stop_execution_flag
     stop_execution_flag = True
     return jsonify({'status': 'stopped'})
-
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -199,38 +190,54 @@ def clear_chat():
         conn.commit()
     return jsonify({'status': 'cleared'})
 
-
 # === Table API ===
 @app.route('/ask_table', methods=['POST'])
 def ask_table():
     try:
         data = request.json
         query = data.get("query", "")
-
+        
         with data_lock:
             df = data_cache
+        
         if df is None:
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
-
-        response_text = get_chat_response(query, df)
-
-        # Parse TABLE_DATA JSON if returned
+        
+        # Get session history like in the /ask endpoint
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
+            session_history = cursor.fetchall()
+        
+        # Get response from chatbot model with session history
+        response_text = get_chat_response(query, df, session_history=session_history)
+        print(f"[DEBUG] Raw response: {response_text}")
+        
         table_json = None
         if "TABLE_DATA:" in response_text:
             try:
+                # Extract the JSON part after "TABLE_DATA:"
                 table_str = response_text.split("TABLE_DATA:")[1].strip()
+                print(f"[DEBUG] Extracted table string: {table_str}")
+                
+                # Parse the JSON
                 table_json = json.loads(table_str)
+                print(f"[DEBUG] Parsed table JSON: {table_json}")
+            except json.JSONDecodeError as e:
+                print(f"[TABLE_PARSE_ERROR] JSON decode error: {e}")
+                print(f"[TABLE_PARSE_ERROR] Problematic string: {table_str}")
             except Exception as e:
-                print(f"[TABLE_PARSE_ERROR] {e}")
-
+                print(f"[TABLE_PARSE_ERROR] Other error: {e}")
+        else:
+            print("[DEBUG] No TABLE_DATA found in response")
+            
         return jsonify({
             "text_response": response_text,
             "table_data": table_json
         })
-
     except Exception as e:
+        print(f"[ERROR] General error in /ask_table: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
 
 # === Chart API ===
 @app.route('/chart', methods=['POST'])
@@ -238,51 +245,76 @@ def chart():
     try:
         data = request.json
         query = data.get("query", "")
-
+        
         with data_lock:
             df = data_cache
+        
         if df is None:
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
-
-        response_text = get_chat_response(query, df)
-
+        
+        # Get session history like in the /ask endpoint
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
+            session_history = cursor.fetchall()
+        
+        # Get response from chatbot model with session history
+        response_text = get_chat_response(query, df, session_history=session_history)
+        print(f"[DEBUG] Raw response for chart: {response_text}")
+        
         chart_json = None
         if "CHART_DATA:" in response_text:
             try:
+                # Extract the JSON part after "CHART_DATA:"
                 chart_str = response_text.split("CHART_DATA:")[1].strip()
+                print(f"[DEBUG] Extracted chart string: {chart_str}")
+                
+                # Parse the JSON
                 chart_json = json.loads(chart_str)
+                print(f"[DEBUG] Parsed chart JSON: {chart_json}")
+            except json.JSONDecodeError as e:
+                print(f"[CHART_PARSE_ERROR] JSON decode error: {e}")
+                print(f"[CHART_PARSE_ERROR] Problematic string: {chart_str}")
             except Exception as e:
-                print(f"[CHART_PARSE_ERROR] {e}")
-
+                print(f"[CHART_PARSE_ERROR] Other error: {e}")
+        else:
+            print("[DEBUG] No CHART_DATA found in response")
+            
         if chart_json:
             labels = chart_json.get("labels", [])
             values = chart_json.get("values", [])
-
+            title = chart_json.get("title", "Chart")
+            
             # Generate chart
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(10, 6))
             ax.bar(labels, values)
+            ax.set_title(title)
             ax.set_xlabel("Category")
             ax.set_ylabel("Value")
-
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
             # Convert to base64
             img = io.BytesIO()
             plt.savefig(img, format='png')
             img.seek(0)
             plot_url = base64.b64encode(img.getvalue()).decode()
             plt.close(fig)
-
+            
             return jsonify({
                 "text_response": response_text,
                 "chart_data": chart_json,
                 "chart_image": plot_url
             })
-
-        return jsonify({"text_response": response_text, "chart_data": None})
-
+        
+        return jsonify({
+            "text_response": response_text, 
+            "chart_data": None
+        })
     except Exception as e:
+        print(f"[ERROR] General error in /chart: {str(e)}")
         return jsonify({"error": str(e)}), 500
-    
-    
+
 # === Entry Point ===
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5004))
