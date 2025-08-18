@@ -3,6 +3,10 @@ import shutil
 import pandas as pd
 import sqlite3
 import threading
+import re
+import io
+import base64
+import matplotlib.pyplot as plt
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
@@ -194,6 +198,75 @@ def clear_chat():
         conn.commit()
     return jsonify({'status': 'cleared'})
 
+
+# === Table API ===
+@app.route('/ask_table', methods=['POST'])
+def ask_table():
+    try:
+        data = request.json
+        query = data.get("query", "")
+
+        # Use your existing chatbot function
+        with data_lock:
+            df = data_cache
+
+        if df is None:
+            return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
+
+        response_text = get_chat_response(query, df)
+
+        # Extract table (if exists) and convert to JSON
+        table_match = re.search(r'<table.*?>.*?</table>', response_text, re.DOTALL)
+        table_json = None
+        if table_match:
+            html_table = table_match.group(0)
+            df_table = pd.read_html(html_table)[0]
+            table_json = df_table.to_dict(orient="records")
+
+        return jsonify({
+            "text_response": response_text,
+            "table_data": table_json
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# === Chart API ===
+@app.route('/chart', methods=['POST'])
+def chart():
+    try:
+        data = request.json
+        x_col = data.get("x")
+        y_col = data.get("y")
+
+        with data_lock:
+            df = data_cache
+
+        if df is None:
+            return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
+        
+        if not x_col or not y_col:
+            return jsonify({"error": "Please provide 'x' and 'y' column names"}), 400
+        
+        # Create chart
+        fig, ax = plt.subplots()
+        df.plot(x=x_col, y=y_col, kind="bar", ax=ax)
+
+        # Save plot to base64
+        img = io.BytesIO()
+        plt.savefig(img, format='png')
+        img.seek(0)
+        plot_url = base64.b64encode(img.getvalue()).decode()
+
+        plt.close(fig)  # Free memory
+
+        return jsonify({"chart": plot_url})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+    
 # === Entry Point ===
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5004))
