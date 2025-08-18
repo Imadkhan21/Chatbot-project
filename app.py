@@ -8,7 +8,9 @@ import io
 import base64
 import json
 import matplotlib.pyplot as plt
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+import uuid
+from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
 from bs4 import BeautifulSoup  # Added for HTML parsing
@@ -17,6 +19,7 @@ from bs4 import BeautifulSoup  # Added for HTML parsing
 stop_execution_flag = False
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')  # New directory for HTML templates
 ALLOWED_EXTENSIONS = {'csv', 'db'}
 STATIC_CSV = os.path.join(BASE_DIR, 'patient_details2.csv')  # Default CSV
 DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
@@ -25,6 +28,21 @@ DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = 'AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0'
+
+# Create templates directory if it doesn't exist
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
+print(f"Templates directory: {TEMPLATES_DIR}")
+print(f"Templates directory exists: {os.path.exists(TEMPLATES_DIR)}")
+
+# Test write permissions
+try:
+    test_file = os.path.join(TEMPLATES_DIR, 'test.txt')
+    with open(test_file, 'w') as f:
+        f.write('test')
+    os.remove(test_file)
+    print("Write permission to templates directory: OK")
+except Exception as e:
+    print(f"Write permission error: {e}")
 
 # === DB Initialization ===
 def init_db():
@@ -191,17 +209,45 @@ def clear_chat():
         conn.commit()
     return jsonify({'status': 'cleared'})
 
-# === Table API ===
+# === Test Route ===
+@app.route('/test_template')
+def test_template():
+    try:
+        # Create a simple test template
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        filename = f"test_{timestamp}.html"
+        filepath = os.path.join(TEMPLATES_DIR, filename)
+        
+        with open(filepath, 'w') as f:
+            f.write("<html><body><h1>Test Template</h1><p>If you see this, the template serving is working!</p></body></html>")
+        
+        template_url = f"{request.host_url}templates/{filename}"
+        
+        return jsonify({
+            "message": "Test template created",
+            "template_url": template_url
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# === New Route to Serve Templates ===
+@app.route('/templates/<filename>')
+def serve_template(filename):
+    return send_from_directory(TEMPLATES_DIR, filename)
+
+# === Table API (Modified with Debug Logging) ===
 @app.route('/ask_table', methods=['POST'])
 def ask_table():
     try:
         data = request.json
-        query = data.get("message", "")
+        query = data.get("query", "")
+        print(f"[DEBUG] Received query: {query}")
         
         with data_lock:
             df = data_cache
         
         if df is None:
+            print("[DEBUG] No data loaded")
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
         
         # Get session history like in the /ask endpoint
@@ -212,77 +258,131 @@ def ask_table():
         
         # Get response from chatbot model with session history
         response_text = get_chat_response(query, df, session_history=session_history)
-        print(f"[DEBUG] Raw response: {response_text}")
+        print(f"[DEBUG] Raw response: {response_text[:100]}...")  # Print first 100 chars
         
-        table_json = None
-        if "TABLE_DATA:" in response_text:
-            try:
-                # Extract the JSON part after "TABLE_DATA:"
-                table_str = response_text.split("TABLE_DATA:")[1].strip()
-                print(f"[DEBUG] Extracted table string: {table_str}")
-                
-                # Parse the JSON
-                table_json = json.loads(table_str)
-                print(f"[DEBUG] Parsed table JSON: {table_json}")
-            except json.JSONDecodeError as e:
-                print(f"[TABLE_PARSE_ERROR] JSON decode error: {e}")
-                print(f"[TABLE_PARSE_ERROR] Problematic string: {table_str}")
-            except Exception as e:
-                print(f"[TABLE_PARSE_ERROR] Other error: {e}")
-        else:
-            print("[DEBUG] No TABLE_DATA found in response")
+        # Generate a unique filename for the template
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"table_{timestamp}_{unique_id}.html"
+        filepath = os.path.join(TEMPLATES_DIR, filename)
+        print(f"[DEBUG] Generated filename: {filename}")
+        print(f"[DEBUG] Full filepath: {filepath}")
         
-        # If TABLE_DATA not found or parsing failed, parse HTML table
-        if table_json is None:
-            try:
-                # Parse HTML table using BeautifulSoup
-                soup = BeautifulSoup(response_text, 'html.parser')
-                table = soup.find('table')
-                
-                if table:
-                    # Extract headers
-                    headers = [th.text.strip() for th in table.find_all('th')]
-                    
-                    # Extract rows
-                    rows = []
-                    for tr in table.find_all('tr')[1:]:  # Skip header row
-                        cells = [td.text.strip() for td in tr.find_all('td')]
-                        if len(cells) == len(headers):
-                            row_dict = {}
-                            for i, header in enumerate(headers):
-                                # Create key from header (lowercase, replace spaces with underscores)
-                                key = header.lower().replace(' ', '_').replace('-', '_')
-                                row_dict[key] = cells[i]
-                            rows.append(row_dict)
-                    
-                    # Create structured JSON
-                    table_json = {
-                        "columns": [{"label": header, "key": header.lower().replace(' ', '_').replace('-', '_')} for header in headers],
-                        "rows": rows
-                    }
-                    print(f"[DEBUG] Parsed table from HTML: {table_json}")
-            except Exception as e:
-                print(f"[HTML_PARSE_ERROR] Error parsing HTML table: {e}")
-            
-        return jsonify({
-            "text_response": response_text,
-            "table_data": table_json
-        })
+        # Create HTML template for the table
+        html_template = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Patient Data Table</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }}
+        .table-container {{
+            overflow-x: auto;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }}
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }}
+        th {{
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }}
+        tr:nth-child(even) {{
+            background-color: #f9f9f9;
+        }}
+        tr:hover {{
+            background-color: #f1f1f1;
+        }}
+        .back-link {{
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Patient Data Table</h1>
+        <div class="table-container">
+            {response_text}
+        </div>
+        <a href="#" class="back-link" onclick="window.history.back()">Back</a>
+    </div>
+</body>
+</html>
+        """
+        
+        # Save the HTML template to file
+        try:
+            with open(filepath, 'w') as f:
+                f.write(html_template)
+            print(f"[DEBUG] File saved successfully")
+            print(f"[DEBUG] File exists: {os.path.exists(filepath)}")
+            print(f"[DEBUG] File size: {os.path.getsize(filepath)} bytes")
+        except Exception as e:
+            print(f"[ERROR] Failed to save file: {e}")
+            return jsonify({"error": f"Failed to save template: {str(e)}"}), 500
+        
+        # Generate the URL for the template
+        try:
+            template_url = f"{request.host_url}templates/{filename}"
+            print(f"[DEBUG] Generated template URL: {template_url}")
+        except Exception as e:
+            print(f"[ERROR] Failed to generate URL: {e}")
+            return jsonify({"error": f"Failed to generate URL: {str(e)}"}), 500
+        
+        response_data = {
+            "template_url": template_url
+        }
+        print(f"[DEBUG] Returning response: {response_data}")
+        
+        return jsonify(response_data)
     except Exception as e:
         print(f"[ERROR] General error in /ask_table: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# === Chart API ===
+# === Chart API (Modified) ===
 @app.route('/chart', methods=['POST'])
 def chart():
     try:
         data = request.json
-        query = data.get("message", "")
+        query = data.get("query", "")
+        print(f"[DEBUG] Received chart query: {query}")
         
         with data_lock:
             df = data_cache
         
         if df is None:
+            print("[DEBUG] No data loaded for chart")
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
         
         # Get session history like in the /ask endpoint
@@ -293,7 +393,7 @@ def chart():
         
         # Get response from chatbot model with session history
         response_text = get_chat_response(query, df, session_history=session_history)
-        print(f"[DEBUG] Raw response for chart: {response_text}")
+        print(f"[DEBUG] Raw chart response: {response_text[:100]}...")
         
         chart_json = None
         if "CHART_DATA:" in response_text:
@@ -334,16 +434,103 @@ def chart():
             plot_url = base64.b64encode(img.getvalue()).decode()
             plt.close(fig)
             
-            return jsonify({
-                "text_response": response_text,
-                "chart_data": chart_json,
-                "chart_image": plot_url
-            })
+            # Generate a unique filename for the template
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            unique_id = str(uuid.uuid4())[:8]
+            filename = f"chart_{timestamp}_{unique_id}.html"
+            filepath = os.path.join(TEMPLATES_DIR, filename)
+            print(f"[DEBUG] Generated chart filename: {filename}")
+            print(f"[DEBUG] Full chart filepath: {filepath}")
+            
+            # Create HTML template for the chart
+            html_template = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }}
+        .chart-container {{
+            text-align: center;
+            margin-top: 20px;
+        }}
+        .chart-container img {{
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }}
+        .back-link {{
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{title}</h1>
+        <div class="chart-container">
+            <img src="data:image/png;base64,{plot_url}" alt="{title}">
+        </div>
+        <a href="#" class="back-link" onclick="window.history.back()">Back</a>
+    </div>
+</body>
+</html>
+            """
+            
+            # Save the HTML template to file
+            try:
+                with open(filepath, 'w') as f:
+                    f.write(html_template)
+                print(f"[DEBUG] Chart file saved successfully")
+                print(f"[DEBUG] Chart file exists: {os.path.exists(filepath)}")
+                print(f"[DEBUG] Chart file size: {os.path.getsize(filepath)} bytes")
+            except Exception as e:
+                print(f"[ERROR] Failed to save chart file: {e}")
+                return jsonify({"error": f"Failed to save chart template: {str(e)}"}), 500
+            
+            # Generate the URL for the template
+            try:
+                template_url = f"{request.host_url}templates/{filename}"
+                print(f"[DEBUG] Generated chart template URL: {template_url}")
+            except Exception as e:
+                print(f"[ERROR] Failed to generate chart URL: {e}")
+                return jsonify({"error": f"Failed to generate chart URL: {str(e)}"}), 500
+            
+            response_data = {
+                "template_url": template_url
+            }
+            print(f"[DEBUG] Returning chart response: {response_data}")
+            
+            return jsonify(response_data)
         
         return jsonify({
-            "text_response": response_text, 
-            "chart_data": None
-        })
+            "error": "No chart data found"
+        }), 400
     except Exception as e:
         print(f"[ERROR] General error in /chart: {str(e)}")
         return jsonify({"error": str(e)}), 500
