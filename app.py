@@ -240,7 +240,7 @@ def serve_template(filename):
 def ask_table():
     try:
         data = request.json
-        query = data.get("query", "")
+        query = data.get("message", "")
         print(f"[DEBUG] Received query: {query}")
         
         with data_lock:
@@ -375,7 +375,7 @@ def ask_table():
 def chart():
     try:
         data = request.json
-        query = data.get("query", "")
+        query = data.get("message", "")
         print(f"[DEBUG] Received chart query: {query}")
         
         with data_lock:
