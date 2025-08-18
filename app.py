@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
+from bs4 import BeautifulSoup  # Added for HTML parsing
 
 # === Paths ===
 stop_execution_flag = False
@@ -230,6 +231,38 @@ def ask_table():
                 print(f"[TABLE_PARSE_ERROR] Other error: {e}")
         else:
             print("[DEBUG] No TABLE_DATA found in response")
+        
+        # If TABLE_DATA not found or parsing failed, parse HTML table
+        if table_json is None:
+            try:
+                # Parse HTML table using BeautifulSoup
+                soup = BeautifulSoup(response_text, 'html.parser')
+                table = soup.find('table')
+                
+                if table:
+                    # Extract headers
+                    headers = [th.text.strip() for th in table.find_all('th')]
+                    
+                    # Extract rows
+                    rows = []
+                    for tr in table.find_all('tr')[1:]:  # Skip header row
+                        cells = [td.text.strip() for td in tr.find_all('td')]
+                        if len(cells) == len(headers):
+                            row_dict = {}
+                            for i, header in enumerate(headers):
+                                # Create key from header (lowercase, replace spaces with underscores)
+                                key = header.lower().replace(' ', '_').replace('-', '_')
+                                row_dict[key] = cells[i]
+                            rows.append(row_dict)
+                    
+                    # Create structured JSON
+                    table_json = {
+                        "columns": [{"label": header, "key": header.lower().replace(' ', '_').replace('-', '_')} for header in headers],
+                        "rows": rows
+                    }
+                    print(f"[DEBUG] Parsed table from HTML: {table_json}")
+            except Exception as e:
+                print(f"[HTML_PARSE_ERROR] Error parsing HTML table: {e}")
             
         return jsonify({
             "text_response": response_text,
