@@ -196,7 +196,7 @@ def clear_chat():
 def ask_table():
     try:
         data = request.json
-        query = data.get("query", "")
+        query = data.get("message", "")
         
         with data_lock:
             df = data_cache
@@ -277,7 +277,7 @@ def ask_table():
 def chart():
     try:
         data = request.json
-        query = data.get("query", "")
+        query = data.get("message", "")
         
         with data_lock:
             df = data_cache
