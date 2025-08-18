@@ -6,6 +6,7 @@ import threading
 import re
 import io
 import base64
+import json
 import matplotlib.pyplot as plt
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
@@ -206,22 +207,21 @@ def ask_table():
         data = request.json
         query = data.get("query", "")
 
-        # Use your existing chatbot function
         with data_lock:
             df = data_cache
-
         if df is None:
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
 
         response_text = get_chat_response(query, df)
 
-        # Extract table (if exists) and convert to JSON
-        table_match = re.search(r'<table.*?>.*?</table>', response_text, re.DOTALL)
+        # Parse TABLE_DATA JSON if returned
         table_json = None
-        if table_match:
-            html_table = table_match.group(0)
-            df_table = pd.read_html(html_table)[0]
-            table_json = df_table.to_dict(orient="records")
+        if "TABLE_DATA:" in response_text:
+            try:
+                table_str = response_text.split("TABLE_DATA:")[1].strip()
+                table_json = json.loads(table_str)
+            except Exception as e:
+                print(f"[TABLE_PARSE_ERROR] {e}")
 
         return jsonify({
             "text_response": response_text,
@@ -237,32 +237,48 @@ def ask_table():
 def chart():
     try:
         data = request.json
-        x_col = data.get("x")
-        y_col = data.get("y")
+        query = data.get("query", "")
 
         with data_lock:
             df = data_cache
-
         if df is None:
             return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
-        
-        if not x_col or not y_col:
-            return jsonify({"error": "Please provide 'x' and 'y' column names"}), 400
-        
-        # Create chart
-        fig, ax = plt.subplots()
-        df.plot(x=x_col, y=y_col, kind="bar", ax=ax)
 
-        # Save plot to base64
-        img = io.BytesIO()
-        plt.savefig(img, format='png')
-        img.seek(0)
-        plot_url = base64.b64encode(img.getvalue()).decode()
+        response_text = get_chat_response(query, df)
 
-        plt.close(fig)  # Free memory
+        chart_json = None
+        if "CHART_DATA:" in response_text:
+            try:
+                chart_str = response_text.split("CHART_DATA:")[1].strip()
+                chart_json = json.loads(chart_str)
+            except Exception as e:
+                print(f"[CHART_PARSE_ERROR] {e}")
 
-        return jsonify({"chart": plot_url})
-    
+        if chart_json:
+            labels = chart_json.get("labels", [])
+            values = chart_json.get("values", [])
+
+            # Generate chart
+            fig, ax = plt.subplots()
+            ax.bar(labels, values)
+            ax.set_xlabel("Category")
+            ax.set_ylabel("Value")
+
+            # Convert to base64
+            img = io.BytesIO()
+            plt.savefig(img, format='png')
+            img.seek(0)
+            plot_url = base64.b64encode(img.getvalue()).decode()
+            plt.close(fig)
+
+            return jsonify({
+                "text_response": response_text,
+                "chart_data": chart_json,
+                "chart_image": plot_url
+            })
+
+        return jsonify({"text_response": response_text, "chart_data": None})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
