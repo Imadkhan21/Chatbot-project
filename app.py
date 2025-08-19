@@ -8,18 +8,17 @@ import io
 import base64
 import json
 import matplotlib.pyplot as plt
-import uuid
-from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from werkzeug.utils import secure_filename
 from chatbot_model import get_chat_response  # Make sure chatbot_model.py exists
-from bs4 import BeautifulSoup  # Added for HTML parsing
+from bs4 import BeautifulSoup
+import traceback
+import time
 
 # === Paths ===
 stop_execution_flag = False
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
-TEMPLATES_DIR = os.path.join(BASE_DIR, 'templates')  # New directory for HTML templates
 ALLOWED_EXTENSIONS = {'csv', 'db'}
 STATIC_CSV = os.path.join(BASE_DIR, 'patient_details2.csv')  # Default CSV
 DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
@@ -28,21 +27,6 @@ DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = 'AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0'
-
-# Create templates directory if it doesn't exist
-os.makedirs(TEMPLATES_DIR, exist_ok=True)
-print(f"Templates directory: {TEMPLATES_DIR}")
-print(f"Templates directory exists: {os.path.exists(TEMPLATES_DIR)}")
-
-# Test write permissions
-try:
-    test_file = os.path.join(TEMPLATES_DIR, 'test.txt')
-    with open(test_file, 'w') as f:
-        f.write('test')
-    os.remove(test_file)
-    print("Write permission to templates directory: OK")
-except Exception as e:
-    print(f"Write permission error: {e}")
 
 # === DB Initialization ===
 def init_db():
@@ -136,140 +120,58 @@ def index():
 def ask():
     global stop_execution_flag
     stop_execution_flag = False  # reset at the start of request
-    user_input = request.json.get('message')
-    with data_lock:
-        df = data_cache
-    if df is None:
-        return jsonify({'response': '⚠ No file uploaded or data loaded. Please upload a CSV first.'})
+    start_time = time.time()
     
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
-        session_history = cursor.fetchall()
-    
-    if stop_execution_flag:
-        return jsonify({'status': 'stopped', 'response': None})
-    
-    response = get_chat_response(user_input, df, session_history=session_history)
-    
-    if stop_execution_flag:
-        return jsonify({'status': 'stopped', 'response': None})
-    
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO chat_history (message, response) VALUES (?, ?)", (user_input, response))
-        conn.commit()
-    
-    return jsonify({'response': response})
-
-@app.route('/stop_execution', methods=['POST'])
-def stop_execution():
-    global stop_execution_flag
-    stop_execution_flag = True
-    return jsonify({'status': 'stopped'})
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return redirect(url_for('index'))
-    file = request.files['file']
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-        file.save(save_path)
-        set_current_file(filename)
-        load_data()
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.execute("DELETE FROM chat_history")
-            conn.commit()
-    return redirect(url_for('index'))
-
-@app.route('/delete_file', methods=['POST'])
-def delete_file():
-    current_file = get_current_file()
-    if current_file:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], current_file)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM current_file")
-            cursor.execute("DELETE FROM chat_history")
-            conn.commit()
-        global data_cache
-        with data_lock:
-            data_cache = None
-    return redirect(url_for('index'))
-
-@app.route('/clear_chat', methods=['POST'])
-def clear_chat():
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute("DELETE FROM chat_history")
-        conn.commit()
-    return jsonify({'status': 'cleared'})
-
-# === Test Route ===
-@app.route('/test_template')
-def test_template():
     try:
-        # Create a simple test template
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = f"test_{timestamp}.html"
-        filepath = os.path.join(TEMPLATES_DIR, filename)
-        
-        with open(filepath, 'w') as f:
-            f.write("<html><body><h1>Test Template</h1><p>If you see this, the template serving is working!</p></body></html>")
-        
-        template_url = f"{request.host_url}templates/{filename}"
-        
-        return jsonify({
-            "message": "Test template created",
-            "template_url": template_url
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# === New Route to Serve Templates ===
-@app.route('/templates/<filename>')
-def serve_template(filename):
-    return send_from_directory(TEMPLATES_DIR, filename)
-
-# === Table API (Modified with Debug Logging) ===
-@app.route('/ask_table', methods=['POST'])
-def ask_table():
-    try:
-        data = request.json
-        query = data.get("message", "")
-        print(f"[DEBUG] Received query: {query}")
+        user_input = request.json.get('message')
+        print(f"[DEBUG] Received request: {user_input}")
         
         with data_lock:
             df = data_cache
         
         if df is None:
             print("[DEBUG] No data loaded")
-            return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
+            return jsonify({'response': '⚠ No file uploaded or data loaded. Please upload a CSV first.'})
         
-        # Get session history like in the /ask endpoint
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
             session_history = cursor.fetchall()
         
-        # Get response from chatbot model with session history
-        response_text = get_chat_response(query, df, session_history=session_history)
-        print(f"[DEBUG] Raw response: {response_text[:100]}...")  # Print first 100 chars
+        if stop_execution_flag:
+            print("[DEBUG] Execution stopped by flag")
+            return jsonify({'status': 'stopped', 'response': None})
         
-        # Generate a unique filename for the template
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        unique_id = str(uuid.uuid4())[:8]
-        filename = f"table_{timestamp}_{unique_id}.html"
-        filepath = os.path.join(TEMPLATES_DIR, filename)
-        print(f"[DEBUG] Generated filename: {filename}")
-        print(f"[DEBUG] Full filepath: {filepath}")
+        print(f"[DEBUG] Getting chat response... (Time: {time.time() - start_time:.2f}s)")
+        try:
+            response = get_chat_response(user_input, df, session_history=session_history)
+            print(f"[DEBUG] Got response in {time.time() - start_time:.2f}s")
+            print(f"[DEBUG] Response length: {len(response)} characters")
+            print(f"[DEBUG] Response preview: {response[:200]}...")
+        except Exception as e:
+            print(f"[ERROR] Error in get_chat_response: {str(e)}")
+            print(traceback.format_exc())
+            return jsonify({'response': f'Error getting response: {str(e)}'})
         
-        # Create HTML template for the table
-        html_template = f"""
+        if stop_execution_flag:
+            print("[DEBUG] Execution stopped by flag after getting response")
+            return jsonify({'status': 'stopped', 'response': None})
+        
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO chat_history (message, response) VALUES (?, ?)", (user_input, response))
+                conn.commit()
+            print("[DEBUG] Saved to chat history")
+        except Exception as e:
+            print(f"[ERROR] Error saving to chat history: {str(e)}")
+        
+        # Check if the response contains a table
+        if "<table" in response:
+            print("[DEBUG] Response contains table, creating template")
+            try:
+                # Create HTML template for the table
+                table_template = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -318,132 +220,65 @@ def ask_table():
         tr:hover {{
             background-color: #f1f1f1;
         }}
-        .back-link {{
-            display: inline-block;
-            margin-top: 20px;
-            padding: 10px 15px;
-            background-color: #4CAF50;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Patient Data Table</h1>
         <div class="table-container">
-            {response_text}
+            {response}
         </div>
-        <a href="#" class="back-link" onclick="window.history.back()">Back</a>
     </div>
 </body>
 </html>
-        """
+                """
+                print(f"[DEBUG] Created table template (length: {len(table_template)})")
+                return jsonify({
+                    'response': response,
+                    'response_type': 'table',
+                    'template': table_template
+                })
+            except Exception as e:
+                print(f"[ERROR] Error creating table template: {str(e)}")
+                print(traceback.format_exc())
+                return jsonify({'response': response})
         
-        # Save the HTML template to file
-        try:
-            with open(filepath, 'w') as f:
-                f.write(html_template)
-            print(f"[DEBUG] File saved successfully")
-            print(f"[DEBUG] File exists: {os.path.exists(filepath)}")
-            print(f"[DEBUG] File size: {os.path.getsize(filepath)} bytes")
-        except Exception as e:
-            print(f"[ERROR] Failed to save file: {e}")
-            return jsonify({"error": f"Failed to save template: {str(e)}"}), 500
-        
-        # Generate the URL for the template
-        try:
-            template_url = f"{request.host_url}templates/{filename}"
-            print(f"[DEBUG] Generated template URL: {template_url}")
-        except Exception as e:
-            print(f"[ERROR] Failed to generate URL: {e}")
-            return jsonify({"error": f"Failed to generate URL: {str(e)}"}), 500
-        
-        response_data = {
-            "template_url": template_url
-        }
-        print(f"[DEBUG] Returning response: {response_data}")
-        
-        return jsonify(response_data)
-    except Exception as e:
-        print(f"[ERROR] General error in /ask_table: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# === Chart API (Modified) ===
-@app.route('/chart', methods=['POST'])
-def chart():
-    try:
-        data = request.json
-        query = data.get("message", "")
-        print(f"[DEBUG] Received chart query: {query}")
-        
-        with data_lock:
-            df = data_cache
-        
-        if df is None:
-            print("[DEBUG] No data loaded for chart")
-            return jsonify({"error": "⚠ No data loaded. Please upload a CSV first."}), 400
-        
-        # Get session history like in the /ask endpoint
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT message, response FROM chat_history ORDER BY id ASC")
-            session_history = cursor.fetchall()
-        
-        # Get response from chatbot model with session history
-        response_text = get_chat_response(query, df, session_history=session_history)
-        print(f"[DEBUG] Raw chart response: {response_text[:100]}...")
-        
-        chart_json = None
-        if "CHART_DATA:" in response_text:
+        # Check if the response contains chart data
+        elif "CHART_DATA:" in response:
+            print("[DEBUG] Response contains chart data, creating template")
             try:
                 # Extract the JSON part after "CHART_DATA:"
-                chart_str = response_text.split("CHART_DATA:")[1].strip()
-                print(f"[DEBUG] Extracted chart string: {chart_str}")
+                chart_str = response.split("CHART_DATA:")[1].strip()
+                print(f"[DEBUG] Extracted chart string: {chart_str[:100]}...")
                 
                 # Parse the JSON
                 chart_json = json.loads(chart_str)
                 print(f"[DEBUG] Parsed chart JSON: {chart_json}")
-            except json.JSONDecodeError as e:
-                print(f"[CHART_PARSE_ERROR] JSON decode error: {e}")
-                print(f"[CHART_PARSE_ERROR] Problematic string: {chart_str}")
-            except Exception as e:
-                print(f"[CHART_PARSE_ERROR] Other error: {e}")
-        else:
-            print("[DEBUG] No CHART_DATA found in response")
-            
-        if chart_json:
-            labels = chart_json.get("labels", [])
-            values = chart_json.get("values", [])
-            title = chart_json.get("title", "Chart")
-            
-            # Generate chart
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.bar(labels, values)
-            ax.set_title(title)
-            ax.set_xlabel("Category")
-            ax.set_ylabel("Value")
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            
-            # Convert to base64
-            img = io.BytesIO()
-            plt.savefig(img, format='png')
-            img.seek(0)
-            plot_url = base64.b64encode(img.getvalue()).decode()
-            plt.close(fig)
-            
-            # Generate a unique filename for the template
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            unique_id = str(uuid.uuid4())[:8]
-            filename = f"chart_{timestamp}_{unique_id}.html"
-            filepath = os.path.join(TEMPLATES_DIR, filename)
-            print(f"[DEBUG] Generated chart filename: {filename}")
-            print(f"[DEBUG] Full chart filepath: {filepath}")
-            
-            # Create HTML template for the chart
-            html_template = f"""
+                
+                labels = chart_json.get("labels", [])
+                values = chart_json.get("values", [])
+                title = chart_json.get("title", "Chart")
+                
+                print(f"[DEBUG] Chart data - Labels: {labels}, Values: {values}, Title: {title}")
+                
+                # Generate chart
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.bar(labels, values)
+                ax.set_title(title)
+                ax.set_xlabel("Category")
+                ax.set_ylabel("Value")
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                
+                # Convert to base64
+                img = io.BytesIO()
+                plt.savefig(img, format='png')
+                img.seek(0)
+                plot_url = base64.b64encode(img.getvalue()).decode()
+                plt.close(fig)
+                print("[DEBUG] Generated chart image")
+                
+                # Create HTML template for the chart
+                chart_template = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -479,15 +314,6 @@ def chart():
             border: 1px solid #ddd;
             border-radius: 4px;
         }}
-        .back-link {{
-            display: inline-block;
-            margin-top: 20px;
-            padding: 10px 15px;
-            background-color: #4CAF50;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-        }}
     </style>
 </head>
 <body>
@@ -496,44 +322,80 @@ def chart():
         <div class="chart-container">
             <img src="data:image/png;base64,{plot_url}" alt="{title}">
         </div>
-        <a href="#" class="back-link" onclick="window.history.back()">Back</a>
     </div>
 </body>
 </html>
-            """
-            
-            # Save the HTML template to file
-            try:
-                with open(filepath, 'w') as f:
-                    f.write(html_template)
-                print(f"[DEBUG] Chart file saved successfully")
-                print(f"[DEBUG] Chart file exists: {os.path.exists(filepath)}")
-                print(f"[DEBUG] Chart file size: {os.path.getsize(filepath)} bytes")
+                """
+                print(f"[DEBUG] Created chart template (length: {len(chart_template)})")
+                return jsonify({
+                    'response': response,
+                    'response_type': 'chart',
+                    'template': chart_template
+                })
             except Exception as e:
-                print(f"[ERROR] Failed to save chart file: {e}")
-                return jsonify({"error": f"Failed to save chart template: {str(e)}"}), 500
-            
-            # Generate the URL for the template
-            try:
-                template_url = f"{request.host_url}templates/{filename}"
-                print(f"[DEBUG] Generated chart template URL: {template_url}")
-            except Exception as e:
-                print(f"[ERROR] Failed to generate chart URL: {e}")
-                return jsonify({"error": f"Failed to generate chart URL: {str(e)}"}), 500
-            
-            response_data = {
-                "template_url": template_url
-            }
-            print(f"[DEBUG] Returning chart response: {response_data}")
-            
-            return jsonify(response_data)
+                print(f"[ERROR] Error creating chart template: {str(e)}")
+                print(traceback.format_exc())
+                return jsonify({'response': response})
         
-        return jsonify({
-            "error": "No chart data found"
-        }), 400
+        # Regular text response
+        else:
+            print("[DEBUG] Regular text response")
+            return jsonify({'response': response})
+    
     except Exception as e:
-        print(f"[ERROR] General error in /chart: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        print(f"[ERROR] Unhandled exception in /ask: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'response': f'Error: {str(e)}'})
+    
+    finally:
+        print(f"[DEBUG] Request completed in {time.time() - start_time:.2f}s")
+
+@app.route('/stop_execution', methods=['POST'])
+def stop_execution():
+    global stop_execution_flag
+    stop_execution_flag = True
+    return jsonify({'status': 'stopped'})
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return redirect(url_for('index'))
+    file = request.files['file']
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        file.save(save_path)
+        set_current_file(filename)
+        load_data()
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute("DELETE FROM chat_history")
+            conn.commit()
+    return redirect(url_for('index'))
+
+@app.route('/delete_file', methods=['POST'])
+def delete_file():
+    current_file = get_current_file()
+    if current_file:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], current_file)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM current_file")
+            cursor.execute("DELETE FROM chat_history")
+            conn.commit()
+        global data_cache
+        with data_lock:
+            data_cache = None
+    return redirect(url_for('index'))
+
+@app.route('/clear_chat', methods=['POST'])
+def clear_chat():
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("DELETE FROM chat_history")
+        conn.commit()
+    return jsonify({'status': 'cleared'})
 
 # === Entry Point ===
 if __name__ == '__main__':

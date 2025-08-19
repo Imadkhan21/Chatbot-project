@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 DetectorFactory.seed = 0  # to make language detection consistent
 
 # 🔑 Gemini API key
-GEMINI_API_KEY = "AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0"
+GEMINI_API_KEY = "AIzaSyDhSrwZaIdEM2WVIELNAu7qIa-WRfbsqn4"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # 📦 Load Gemini model
