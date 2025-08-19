@@ -26,7 +26,7 @@ DB_FILE = os.path.join(BASE_DIR, 'chatbot_data.db')
 # === Flask App ===
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = 'AIzaSyC0gdJDMyBRYTTvY5Kxp8FT4KUSqThMLk0'
+app.secret_key = 'AIzaSyDhSrwZaIdEM2WVIELNAu7qIa-WRfbsqn4'
 
 # === DB Initialization ===
 def init_db():
@@ -106,6 +106,16 @@ try:
 except Exception as e:
     print(f"[INIT] Bootstrap error: {e}")
 
+# === Helper function to clean HTML ===
+def clean_html(html_content):
+    """Remove extra whitespace and empty lines from HTML content"""
+    # Remove leading/trailing whitespace from each line
+    lines = [line.strip() for line in html_content.split('\n')]
+    # Remove empty lines
+    lines = [line for line in lines if line]
+    # Join lines with single newlines
+    return '\n'.join(lines)
+
 # === Routes ===
 @app.route('/')
 def index():
@@ -168,83 +178,79 @@ def ask():
         
         # Check if the response contains a table
         if "<table" in response:
-            print("[DEBUG] Response contains table, creating template")
+            print("[DEBUG] Response contains table, creating HTML template")
             try:
-                # Create HTML template for the table
-                table_template = f"""
-<!DOCTYPE html>
+                # Create HTML template for the table without extra indentation
+                table_template = """<!DOCTYPE html>
 <html>
 <head>
-    <title>Patient Data Table</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }}
-        h1 {{
-            color: #333;
-            text-align: center;
-            margin-bottom: 20px;
-        }}
-        .table-container {{
-            overflow-x: auto;
-        }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }}
-        th, td {{
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: left;
-        }}
-        th {{
-            background-color: #f2f2f2;
-            font-weight: bold;
-        }}
-        tr:nth-child(even) {{
-            background-color: #f9f9f9;
-        }}
-        tr:hover {{
-            background-color: #f1f1f1;
-        }}
-    </style>
+<title>Patient Data Table</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+font-family: Arial, sans-serif;
+margin: 0;
+padding: 20px;
+background-color: #f5f5f5;
+}
+.container {
+max-width: 1200px;
+margin: 0 auto;
+background-color: white;
+padding: 20px;
+border-radius: 8px;
+box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+.table-container {
+overflow-x: auto;
+}
+table {
+width: 100%;
+border-collapse: collapse;
+margin-top: 20px;
+}
+th, td {
+border: 1px solid #ddd;
+padding: 12px;
+text-align: left;
+}
+th {
+background-color: #f2f2f2;
+font-weight: bold;
+}
+tr:nth-child(even) {
+background-color: #f9f9f9;
+}
+tr:hover {
+background-color: #f1f1f1;
+}
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="table-container">
-            {response}
-        </div>
-    </div>
+<div class="container">
+<div class="table-container">
+{response}
+</div>
+</div>
 </body>
-</html>
-                """
-                print(f"[DEBUG] Created table template (length: {len(table_template)})")
-                return jsonify({
-                    'response': response,
-                    'response_type': 'table',
-                    'template': table_template
-                })
+</html>"""
+                
+                # Format the template with the response and clean up extra spaces
+                formatted_template = table_template.format(response=response)
+                clean_template = clean_html(formatted_template)
+                print(f"[DEBUG] Created table template (length: {len(clean_template)})")
+                
+                # Return only the cleaned HTML template in the response field
+                return jsonify({'response': clean_template})
             except Exception as e:
                 print(f"[ERROR] Error creating table template: {str(e)}")
                 print(traceback.format_exc())
+                # Fall back to the original response
                 return jsonify({'response': response})
         
         # Check if the response contains chart data
         elif "CHART_DATA:" in response:
-            print("[DEBUG] Response contains chart data, creating template")
+            print("[DEBUG] Response contains chart data, creating HTML template")
             try:
                 # Extract the JSON part after "CHART_DATA:"
                 chart_str = response.split("CHART_DATA:")[1].strip()
@@ -277,69 +283,71 @@ def ask():
                 plt.close(fig)
                 print("[DEBUG] Generated chart image")
                 
-                # Create HTML template for the chart
-                chart_template = f"""
-<!DOCTYPE html>
+                # Create HTML template for the chart without extra indentation
+                chart_template = """<!DOCTYPE html>
 <html>
 <head>
-    <title>{title}</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }}
-        h1 {{
-            color: #333;
-            text-align: center;
-            margin-bottom: 20px;
-        }}
-        .chart-container {{
-            text-align: center;
-            margin-top: 20px;
-        }}
-        .chart-container img {{
-            max-width: 100%;
-            height: auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }}
-    </style>
+<title>{title}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+font-family: Arial, sans-serif;
+margin: 0;
+padding: 20px;
+background-color: #f5f5f5;
+}
+.container {
+max-width: 1200px;
+margin: 0 auto;
+background-color: white;
+padding: 20px;
+border-radius: 8px;
+box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+h1 {
+color: #333;
+text-align: center;
+margin-bottom: 20px;
+}
+.chart-container {
+text-align: center;
+margin-top: 20px;
+}
+.chart-container img {
+max-width: 100%;
+height: auto;
+border: 1px solid #ddd;
+border-radius: 4px;
+}
+</style>
 </head>
 <body>
-    <div class="container">
-        <h1>{title}</h1>
-        <div class="chart-container">
-            <img src="data:image/png;base64,{plot_url}" alt="{title}">
-        </div>
-    </div>
+<div class="container">
+<h1>{title}</h1>
+<div class="chart-container">
+<img src="data:image/png;base64,{plot_url}" alt="{title}">
+</div>
+</div>
 </body>
-</html>
-                """
-                print(f"[DEBUG] Created chart template (length: {len(chart_template)})")
-                return jsonify({
-                    'response': response,
-                    'response_type': 'chart',
-                    'template': chart_template
-                })
+</html>"""
+                
+                # Format the template with the title and plot URL and clean up extra spaces
+                formatted_template = chart_template.format(title=title, plot_url=plot_url)
+                clean_template = clean_html(formatted_template)
+                print(f"[DEBUG] Created chart template (length: {len(clean_template)})")
+                
+                # Return only the cleaned HTML template in the response field
+                return jsonify({'response': clean_template})
             except Exception as e:
                 print(f"[ERROR] Error creating chart template: {str(e)}")
                 print(traceback.format_exc())
+                # Fall back to the original response
                 return jsonify({'response': response})
         
         # Regular text response
         else:
             print("[DEBUG] Regular text response")
+            # Return the text response as-is
             return jsonify({'response': response})
     
     except Exception as e:
@@ -399,5 +407,5 @@ def clear_chat():
 
 # === Entry Point ===
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5004))
+    port = int(os.environ.get('PORT', 5005))
     app.run(host='0.0.0.0', port=port, debug=True)
